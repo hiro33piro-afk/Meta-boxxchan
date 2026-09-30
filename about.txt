@@ -1,0 +1,4 @@
+Disk layout (1.44 MB floppy, 512-byte sectors):
+  LBA 0       boot sector (boot.asm)
+  LBA 1-32    kernel (kernel.asm, 16 KB)
+  LBA 33-64   file system: 16 slots x 1 KB

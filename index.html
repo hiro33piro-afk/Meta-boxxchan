@@ -1,0 +1,152 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>WebVM</title>
+<meta name="description" content="ブラウザだけで x86 PC をエミュレートし、OS を起動できる仮想マシン">
+<link rel="icon" href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 32 32'%3E%3Crect x='3' y='5' width='26' height='18' rx='3' fill='%234f8cff'/%3E%3Crect x='11' y='25' width='10' height='3' rx='1' fill='%234f8cff'/%3E%3Cpath d='M9 11l4 3-4 3M15 17h7' stroke='white' stroke-width='2' fill='none'/%3E%3C/svg%3E">
+<link rel="stylesheet" href="css/style.css">
+</head>
+<body>
+<header class="topbar">
+    <div class="brand">
+        <svg viewBox="0 0 32 32" aria-hidden="true"><rect x="3" y="5" width="26" height="18" rx="3"/><rect x="11" y="25" width="10" height="3" rx="1"/><path d="M9 11l4 3-4 3M15 17h7"/></svg>
+        <span>WebVM</span>
+    </div>
+    <div class="status" id="status" data-state="idle">
+        <span class="dot"></span><span id="status-text">停止中</span>
+    </div>
+    <div class="stats">
+        <span title="エミュレーション速度">⚡ <b id="stat-speed">–</b></span>
+        <span title="実行時間">⏱ <b id="stat-time">–</b></span>
+    </div>
+</header>
+
+<main class="layout">
+    <aside class="sidebar" id="sidebar">
+        <section class="panel">
+            <h2>OS を選択</h2>
+            <div class="os-list" id="os-list"></div>
+        </section>
+
+        <section class="panel">
+            <h2>自分のイメージを起動</h2>
+            <label class="dropzone" id="dropzone">
+                <input type="file" id="file-input" accept=".iso,.img,.ima,.vfd,.flp,.bin,.hdd,.raw">
+                <strong>ファイルを選択</strong>
+                <span>またはここにドロップ<br>(.iso / .img / bzImage)</span>
+            </label>
+            <div class="field">
+                <label for="custom-url">URL から起動</label>
+                <div class="inline">
+                    <input type="url" id="custom-url" placeholder="https://example.com/os.iso">
+                    <button class="btn" id="url-boot">起動</button>
+                </div>
+            </div>
+            <div class="field">
+                <label for="custom-type">ディスクの種類</label>
+                <select id="custom-type">
+                    <option value="auto">自動判定</option>
+                    <option value="cdrom">CD-ROM (ISO)</option>
+                    <option value="fda">フロッピー</option>
+                    <option value="hda">ハードディスク</option>
+                    <option value="bzimage">Linux カーネル (bzImage)</option>
+                </select>
+            </div>
+        </section>
+
+        <section class="panel">
+            <h2>ハードウェア設定</h2>
+            <div class="field">
+                <label for="memory">メモリ</label>
+                <select id="memory">
+                    <option value="0">OS の推奨値</option>
+                    <option value="16">16 MB</option>
+                    <option value="32">32 MB</option>
+                    <option value="64">64 MB</option>
+                    <option value="128">128 MB</option>
+                    <option value="256">256 MB</option>
+                    <option value="512">512 MB</option>
+                </select>
+            </div>
+            <div class="field">
+                <label for="vga-memory">ビデオメモリ</label>
+                <select id="vga-memory">
+                    <option value="2">2 MB</option>
+                    <option value="8" selected>8 MB</option>
+                    <option value="16">16 MB</option>
+                </select>
+            </div>
+            <label class="check"><input type="checkbox" id="acpi"> ACPI を有効化</label>
+            <label class="check"><input type="checkbox" id="speaker" checked> サウンド (PC スピーカー)</label>
+        </section>
+    </aside>
+
+    <section class="workspace">
+        <div class="toolbar" id="toolbar">
+            <button class="btn" id="btn-sidebar" title="サイドバーの表示切替">☰</button>
+            <span class="sep"></span>
+            <button class="btn" id="btn-pause" disabled>⏸ 一時停止</button>
+            <button class="btn" id="btn-reset" disabled>↻ リセット</button>
+            <button class="btn danger" id="btn-stop" disabled>■ 電源オフ</button>
+            <span class="sep"></span>
+            <button class="btn" id="btn-cad" disabled title="Ctrl + Alt + Delete を送信">Ctrl+Alt+Del</button>
+            <button class="btn" id="btn-mouse" disabled title="マウスをキャプチャ (Esc で解除)">🖱 マウス</button>
+            <button class="btn" id="btn-fullscreen" disabled>⛶ 全画面</button>
+            <button class="btn" id="btn-screenshot" disabled>📷 スクショ</button>
+            <span class="sep"></span>
+            <button class="btn" id="btn-save" disabled title="VM の状態をファイルに保存">💾 状態を保存</button>
+            <label class="btn" id="btn-restore" aria-disabled="true" title="保存した状態を復元">
+                📂 状態を復元<input type="file" id="state-input" accept=".bin,.v86state" hidden>
+            </label>
+            <span class="sep"></span>
+            <label class="scale">倍率
+                <select id="scale">
+                    <option value="auto" selected>自動</option>
+                    <option value="1">1x</option>
+                    <option value="1.5">1.5x</option>
+                    <option value="2">2x</option>
+                </select>
+            </label>
+        </div>
+
+        <div class="screen-wrap" id="screen-wrap">
+            <div id="screen" class="screen" tabindex="0">
+                <div class="text-layer"></div>
+                <canvas></canvas>
+            </div>
+            <div class="overlay" id="overlay">
+                <div class="welcome" id="welcome">
+                    <h1>ブラウザで動く仮想マシン</h1>
+                    <p>x86 PC をまるごとエミュレートして、本物の OS を起動します。<br>
+                       OS 一覧から選ぶか、ISO / IMG ファイルをここにドロップしてください。</p>
+                    <button class="btn primary big" id="quick-start">▶ MiniOS を起動</button>
+                </div>
+                <div class="loading" id="loading" hidden>
+                    <div class="spinner"></div>
+                    <p id="loading-text">読み込み中…</p>
+                    <div class="progress"><div id="progress-bar"></div></div>
+                </div>
+            </div>
+        </div>
+        <p class="hint">画面をクリックするとキーボード入力が VM に送られます。</p>
+
+        <details class="serial" id="serial-panel">
+            <summary>シリアルコンソール (COM1)</summary>
+            <pre id="serial-output" class="serial-output" aria-live="polite"></pre>
+            <form class="inline" id="serial-form">
+                <input type="text" id="serial-input" placeholder="COM1 に送信するテキスト (Enter で送信)" autocomplete="off">
+                <button class="btn" type="submit">送信</button>
+                <button class="btn" type="button" id="serial-clear">クリア</button>
+            </form>
+        </details>
+    </section>
+</main>
+
+<div class="toast" id="toast" role="status"></div>
+
+<script src="vendor/v86/libv86.js"></script>
+<script type="module" src="js/app.js"></script>
+</body>
+</html>
